@@ -6,6 +6,7 @@ function Operator()
   this.hint_el = document.createElement('t'); this.hint_el.id = "hint";
   this.el.appendChild(this.input_el);
   this.el.appendChild(this.hint_el);
+  this.name_pattern = new RegExp(/^@(\w+)/, "i");
 
   this.install = function(el)
   {
@@ -13,6 +14,9 @@ function Operator()
 
     this.input_el.addEventListener('keydown',r.operator.key_down, false);
     this.input_el.addEventListener('input',r.operator.input_changed, false);
+    this.input_el.addEventListener('dragover',r.operator.drag_over, false);
+    this.input_el.addEventListener('dragleave',r.operator.drag_leave, false);
+    this.input_el.addEventListener('drop',r.operator.drop, false);
     this.update();
   }
 
@@ -20,7 +24,25 @@ function Operator()
   {
     var words = this.input_el.value.trim().split(" ").length;
     var chars = this.input_el.value.trim().length;
-    this.hint_el.innerHTML = chars+"C "+words+"W";
+    var key = this.input_el.value.split(" ")[this.input_el.value.split(" ").length-1];
+    var autocomplete = key ? this.find_portal_with_key(key) : null;
+
+    if((key.substr(0,1) == "@" || key.substr(0,1) == "~") && autocomplete && autocomplete != "@"+key && autocomplete != "~"+key){
+      this.hint_el.innerHTML = this.find_portal_with_key(key);
+    }
+    else{
+      this.hint_el.innerHTML = chars+"C "+words+"W";  
+    }
+  }
+
+  this.find_portal_with_key = function(key)
+  {
+    key = key.replace("@","").replace("@","").trim();
+    for(name in r.feed.portals){
+      if(name.substr(0,key.length) == key){
+        return name;
+      }
+    }
   }
 
   this.validate = function()
@@ -48,6 +70,7 @@ function Operator()
 
   this.commands = {};
 
+  // catches neauoire from @neauoire
   this.commands.say = function(p)
   {
     var message = p;
@@ -62,9 +85,14 @@ function Operator()
     if(media){
       data.media = media;
     }
+    // if message starts with an @ symbol, then we're doing a mention
     if(message.indexOf("@") == 0){
-      var name = message.split(" ")[0].replace("@","").trim();
-      data.target = r.feed.portals[name].dat;
+      var name = message.split(" ")[0]
+      // execute the regex & get the first matching group (i.e. no @, only the name)
+      name = r.operator.name_pattern.exec(name)[1]
+      if(r.feed.portals[name]){
+        data.target = r.feed.portals[name].dat;  
+      }
     }
     r.portal.add_entry(new Entry(data));
   }
@@ -86,7 +114,7 @@ function Operator()
     }
 
     console.log(r.portal.data.site);
-    
+
     r.portal.save();
     r.portal.update();
     r.feed.update();
@@ -157,11 +185,79 @@ function Operator()
       r.reset();
       return;
     }
+
+    if(e.key == "Tab"){
+      e.preventDefault();
+      var words = r.operator.input_el.value.split(" ");
+      var last = words[words.length - 1]
+      var name_match = r.operator.name_pattern.exec(last);
+      if(name_match) {
+        for (var portal_name in r.feed.portals) {
+          if (portal_name && portal_name.substr(0, name_match[1].length) === name_match[1]) {
+            words[words.length - 1] = "@" + portal_name;
+            r.operator.inject(words.join(" ")+" ");
+            r.operator.update();
+            return;
+          }
+        }
+      }
+    }
     r.operator.update();
   }
 
   this.input_changed = function(e)
   {
     r.operator.update();
+  }
+
+  this.drag = function(bool)
+  {
+    if (bool) {
+      this.input_el.classList.add('drag')
+    } else {
+      this.input_el.classList.remove('drag')
+    }
+  }
+
+  this.drag_over = function(e)
+  {
+    e.preventDefault();
+    r.operator.drag(true);
+  }
+
+  this.drag_leave = function(e)
+  {
+    e.preventDefault();
+    r.operator.drag(false);
+  }
+
+  this.drop = function(e)
+  {
+    e.preventDefault();
+    var files = e.dataTransfer.files;
+    if (files.length === 1) {
+      var file = files[0];
+      var type = file.type;
+
+      if (type === 'image/jpg' || type === 'image/jpeg' || type === 'image/png' || type === 'image/gif') {
+        var reader = new FileReader();
+        reader.onload = async function (e) {
+          var result = e.target.result;
+
+          var archive = new DatArchive(window.location.toString());
+          await archive.writeFile('/media/content/' + file.name, result);
+          await archive.commit();
+
+          var commanderText = 'text_goes_here >> ' + file.name 
+          // if there's  already a message written, append ">> file.name" to it
+          if (r.operator.input_el.value) {
+              commanderText = r.operator.input_el.value.trim() + " >> " + file.name;
+          }
+          r.operator.inject(commanderText);
+        }
+        reader.readAsArrayBuffer(file);
+      }
+    }
+    r.operator.drag(false);
   }
 }

@@ -15,6 +15,11 @@ function Feed(feed_urls)
 
     for(id in this.feed_urls){
       var archive = new DatArchive(this.feed_urls[id]);
+      var fileEvents = archive.createFileActivityStream();
+      fileEvents.addEventListener('changed', e => {
+        console.log("Automated update")
+        r.feed.update();
+      });
       archive.gateway = this.feed_urls[id];
       this.archives.push(archive);
     }
@@ -39,7 +44,7 @@ function Feed(feed_urls)
           online_ports_count += 1;
           entries = entries.concat(feed_entries);
           this.debounced_sort_refresh(entries);
-          r.portal.port_list_el.innerHTML = this.feed_html;
+          r.portal.port_list_el.innerHTML = this.get_feed_html();
         })
         .catch((e) => {
           console.warn(e);
@@ -53,39 +58,32 @@ function Feed(feed_urls)
     });
   }
 
+  this.get_feed_html = function()
+  {
+    var feed_html = "";
+    for(name in r.feed.portals){
+      console.log(name);
+      var portal = r.feed.portals[name];
+      var last_entry = portal.feed[portal.feed.length-1];
+      var is_active = Math.floor((new Date() - last_entry.timestamp) / 1000);
+      var rune = portal.port.indexOf(r.portal.data.dat) > -1 ? "@" : "~";
+
+      if(is_active > 190000 && portal.name != r.portal.data.name){
+        feed_html += "<ln title='"+(timeSince(last_entry.timestamp))+"' class='dead' data-operation='un"+portal.dat+"'>"+rune+""+portal.name+"</ln>";
+      }
+      else{
+        feed_html+= "<ln title='"+(timeSince(last_entry.timestamp))+"' class='"+(is_active < 150000 ? "active" : "inactive")+"'><a href='"+portal.dat+"'>"+rune+""+portal.name+"</a></ln>";
+      }
+    }
+    return feed_html;
+  }
+
   this.get_feed = function(archive)
   {
-    this.feed_html = "";
-
     return archive.readFile('portal.json')
       .then((portal_data) => {
         var portal = JSON.parse(portal_data);
-        var last_entry = portal.feed[portal.feed.length-1];
-        var is_active = Math.floor((new Date() - last_entry.timestamp) / 1000);
-        var rune = portal.port.indexOf(r.portal.data.dat) > -1 ? "@" : "~";
-
-        if(is_active > 190000 && portal.name != r.portal.data.name){
-          this.feed_html += "<ln title='"+(timeSince(last_entry.timestamp))+"' class='dead' data-operation='un"+archive.gateway+"'>"+rune+""+portal.name+"</ln>";
-        }
-        else{
-          this.feed_html+= "<ln title='"+(timeSince(last_entry.timestamp))+"' class='"+(is_active < 150000 ? "active" : "inactive")+"'><a href='"+portal.dat+"'>"+rune+""+portal.name+"</a></ln>";
-        }
-        
         this.portals[portal.name] = portal;
-
-        // Listen to active feeds
-        try {
-          if(is_active < 150000){
-            fileEvents = archive.createFileActivityStream();
-            fileEvents.addEventListener('changed', e => {
-              console.log("Automated update")
-              r.feed.update();
-            });
-          }
-        } catch (err) {
-          console.warn(err);
-        }
-
         return portal.feed
           .filter((entry) => {
             if (!this.filter) return true;
@@ -118,7 +116,6 @@ function Feed(feed_urls)
     console.log("Refresh!")
 
     var html = this.filter ? "<c class='clear_filter' data-operation='clear_filter'>Filtering by "+this.filter+"</c>" : "";
-
     var c = 0;
     for(id in entries){
       var entry = entries[id];
